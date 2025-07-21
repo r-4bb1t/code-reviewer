@@ -5,7 +5,12 @@ import re
 import openai
 import requests
 from typing import Any
-from .prompts import create_initial_prompt, create_context_prompt, create_final_prompt
+from .prompts import (
+    create_initial_prompt,
+    create_context_prompt,
+    create_final_prompt,
+    create_summary_prompt,
+)
 
 
 def run(cmd: str) -> str:
@@ -25,6 +30,16 @@ def get_pr_number() -> str:
     with open(event_path) as f:
         event = json.load(f)
     return str(event["pull_request"]["number"])
+
+
+def get_pr_author() -> str:
+    event_path = os.environ.get("GITHUB_EVENT_PATH")
+    if not event_path or not os.path.exists(event_path):
+        return "developer"
+
+    with open(event_path) as f:
+        event = json.load(f)
+    return event["pull_request"]["user"]["login"]
 
 
 def get_pr_head_sha() -> str:
@@ -309,17 +324,28 @@ def parse_context_requests(
         return requests, "", []
 
 
-def post_comment(github_token: str, body: str, pr_number: str):
+def post_comment(
+    github_token: str, body: str, pr_number: str, comment_id: int | None = None
+) -> int:
     repo = os.environ["GITHUB_REPOSITORY"]
-    url = f"https://api.github.com/repos/{repo}/issues/{pr_number}/comments"
+    if comment_id:
+        url = f"https://api.github.com/repos/{repo}/issues/comments/{comment_id}"
+        method = "PATCH"
+        json_body = {"body": body}
+    else:
+        url = f"https://api.github.com/repos/{repo}/issues/{pr_number}/comments"
+        method = "POST"
+        json_body = {"body": body}
+
     headers = {
         "Authorization": f"token {github_token}",
         "Accept": "application/vnd.github+json",
         "X-GitHub-Api-Version": "2022-11-28",
     }
-    response = requests.post(url, json={"body": body}, headers=headers)
+    response = requests.request(method, url, json=json_body, headers=headers)
     if response.status_code >= 300:
-        raise RuntimeError(f"Failed to post comment: {response.text}")
+        raise RuntimeError(f"Failed to post or update comment: {response.text}")
+    return response.json()["id"]
 
 
 def get_valid_diff_lines(diff: str) -> dict[str, set[int]]:
@@ -477,10 +503,10 @@ def get_function_definition(
         try:
             if ext == "*.py":
                 # Python 함수 정의 검색
-                cmd = f'find . -name "{ext}" -type f | head -50 | xargs grep -n "def {function_name}\\|class {function_name}" 2>/dev/null || true'
+                cmd = f'find . -name "{ext}" -type f | head -50 | xargs grep -n "def {function_name}\|class {function_name}" 2>/dev/null || true'
             elif ext in ["*.js", "*.ts", "*.jsx", "*.tsx"]:
                 # JavaScript/TypeScript 함수 정의 검색
-                cmd = f'find . -name "{ext}" -type f | head -50 | xargs grep -n "function {function_name}\\|const {function_name}\\|class {function_name}\\|{function_name} =" 2>/dev/null || true'
+                cmd = f'find . -name "{ext}" -type f | head -50 | xargs grep -n "function {function_name}\|const {function_name}\|class {function_name}\|{function_name} =" 2>/dev/null || true'
             else:
                 # 기타 언어
                 cmd = f'find . -name "{ext}" -type f | head -50 | xargs grep -n "{function_name}" 2>/dev/null || true'
@@ -488,12 +514,16 @@ def get_function_definition(
             matching_lines = run(cmd).strip()
             if matching_lines:
                 for line in matching_lines.split("\n"):
-                    if ":" in line:
-                        file_path, line_content = line.split(":", 1)
+                    try:
+                        file_path, line_num_str, content = line.split(":", 2)
+                        line_num = int(line_num_str)
+                        file_path = file_path.strip()
                         if file_path not in results:
                             results[file_path] = get_file_context(
-                                file_path.strip(), None, 10
-                            )[:1000]
+                                file_path, [line_num], 30
+                            )
+                    except (ValueError, IndexError):
+                        continue
         except Exception as e:
             print(f"Error searching function definition for {function_name}: {e}")
             continue
@@ -694,6 +724,25 @@ def review_pr(
         print("✅ No diff found, skipping review.")
         return
 
+    pr_number = get_pr_number()
+    pr_author = get_pr_author()
+
+    print("📄 Generating summary...")
+    summary_prompt = create_summary_prompt(diff, language)
+    summary_message = call_openai(
+        [{"role": "user", "content": summary_prompt}],
+        model,
+        openai_api_key,
+        force_json=False,
+    )
+    summary_message = summary_message.replace("@author", f"@{pr_author}")
+
+    initial_comment_body = (
+        f"{summary_message}\n\n---\n\n*⏳ Detailed review in progress...*"
+    )
+    comment_id = post_comment(github_token, initial_comment_body, pr_number)
+    print(f"✅ Summary posted (comment id: {comment_id}).")
+
     print("🧠 Sending initial analysis to OpenAI...")
 
     system_message = (
@@ -794,7 +843,6 @@ def review_pr(
 
     print("📤 Review completed. Posting comments...")
 
-    pr_number = get_pr_number()
     head_sha = get_pr_head_sha()
 
     if final_line_comments:
@@ -842,5 +890,7 @@ def review_pr(
 {context_details}
 {final_review}"""
 
-    post_comment(github_token, comment_body, pr_number)
+    final_comment_body = f"{summary_message}\n\n---\n\n{final_review}"
+
+    post_comment(github_token, final_comment_body, pr_number, comment_id)
     print("✅ Review comment posted.")

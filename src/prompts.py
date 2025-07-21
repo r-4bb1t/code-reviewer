@@ -88,6 +88,34 @@ IMPORTANT for line_comments:
 ```"""
 
 
+def create_summary_prompt(diff: str, language: str) -> str:
+    lang_instruction = _get_language_instruction(language)
+    return f"""You are a code review AI. {lang_instruction}
+
+Please provide a summary of the following pull request.
+
+Analyze the diff and provide a "Summary of Changes" and "Highlights" section.
+The summary should be addressed to the author of the pull request.
+
+Example:
+
+### Summary of Changes
+Hello @author, I'm Gemini Code Assist! I'm currently reviewing this pull request and will post my feedback shortly. In the meantime, here's a summary to help you and other reviewers quickly get up to speed!
+
+This pull request introduces the capability to cancel lookupWebFinger and lookupObject requests by integrating AbortSignal support. This enhancement provides better control over potentially long-running lookups and serves as a foundational step for implementing future timeout functionalities within the fedify lookup command.
+
+### Highlights
+- **Request Cancellation**: Implemented AbortSignal support in both lookupWebFinger and lookupObject functions, enabling callers to cancel ongoing network requests.
+- **API Enhancement**: The LookupWebFingerOptions and LookupObjectOptions interfaces have been extended to include an optional signal property, allowing an AbortSignal to be passed for request control.
+- **Comprehensive Testing**: New test cases have been added for both lookupObject and lookupWebFinger to thoroughly validate various cancellation scenarios, including immediate aborts, cancellation during active requests, and successful requests with an AbortSignal.
+- **Changelog Update**: The CHANGES.md file has been updated to document the new AbortSignal support for lookupWebFinger().
+
+```diff
+{diff}
+```
+"""
+
+
 def create_context_prompt(
     diff: str, context_data: dict[str, Any], iteration: int, language: str
 ) -> str:
@@ -183,18 +211,23 @@ REQUIRED - Only comment when you have:
 - CONCRETE evidence of a bug or security issue
 - SPECIFIC performance problem with measurable impact
 - ACTUAL code that can be improved with a clear solution
-- If you cannot provide a specific solution, DO NOT comment on that issue
+- If you cannot provide a specific solution, DO NOT comment on that issue.
+
+When writing line comments, think like a senior engineer.
+- **Analyze the root cause**: Don't just point out a problem. Explain *why* it's a problem in the current context.
+- **Consider the broader impact**: How does this change affect other parts of the system? Are there potential side effects?
+- **Provide actionable solutions**: Give concrete code examples that the developer can directly apply.
+- **Look for missing logic**: If the code seems incomplete (e.g., missing cancellation logic in related functions), point it out and suggest how to complete it.
+
+Example of a high-quality comment:
+
+> While this adds cancellation support for the WebFinger lookup part of `lookupObject`, the `documentLoader` calls within `lookupObject` do not use this signal. This means that network requests for fetching the actual ActivityPub object are not cancellable.
+>
+> This can lead to the function not respecting the `AbortSignal` and hanging until the network request times out, which might be unexpected for the caller.
+>
+> To make the cancellation behavior consistent, the `AbortSignal` should also be plumbed through to the `documentLoader`. This would likely involve changes to `getDocumentLoader` in `fedify/runtime/docloader.ts` to accept a signal and pass it to its underlying `fetch` calls.
 
 {_get_markdown_guidelines()}
-
-Example format:
-```python
-# Current code (problematic)
-result = [expensive_function(item) for item in items if expensive_function(item) > threshold]
-
-# Improved code
-result = [value for item in items if (value := expensive_function(item)) > threshold]
-```
 
 Please respond in markdown format.
 
