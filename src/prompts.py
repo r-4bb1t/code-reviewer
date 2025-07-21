@@ -13,10 +13,12 @@ def _get_common_guidelines() -> str:
 - Avoid obvious or minor style suggestions
 - DO NOT write praise or positive comments - only mention actual issues that need fixing
 - Skip commenting if there are no significant issues to report
+- DO NOT write vague comments like "needs verification" or "requires checking"
+- When you see function calls or dependencies, actively request context to examine them directly
 - Only provide code examples for complex issues that need clarification
 
 Follow proper markdown syntax:
-- Use backticks (`) around keywords, function names, variable names, and inline code
+- ALWAYS use backticks (`) around keywords, function names, variable names, and inline code
 - Use triple backticks (```) for code blocks and always specify the language (e.g., ```python, ```javascript)
 - Use proper markdown formatting for emphasis and structure"""
 
@@ -34,6 +36,8 @@ def create_initial_prompt(diff: str, language: str) -> str:
     return f"""You are a code review AI. {lang_instruction}
 
 Analyze the following diff and request additional context if needed.
+
+If you see function calls or dependencies that you need to examine, actively request context instead of writing vague comments.
 
 {_get_common_guidelines()}
 
@@ -94,6 +98,8 @@ def create_context_prompt(
 
 Based on this information, please request more context if needed, or provide the final code review if sufficient.
 
+If you still need to examine other functions or dependencies, continue requesting context instead of writing vague comments.
+
 {_get_common_guidelines()}
 
 Please respond in JSON format:
@@ -140,6 +146,8 @@ Review Guidelines:
 - Avoid obvious or minor style suggestions
 - DO NOT write praise or positive comments - only mention actual issues that need fixing
 - Skip commenting if there are no significant issues to report
+- DO NOT write vague comments like "needs verification" or "requires checking"
+- When you see function calls or dependencies, actively request context to examine them directly
 - Only provide code examples for complex issues that need clarification
 
 {_get_markdown_guidelines()}
@@ -173,6 +181,7 @@ IMPORTANT for line_comments:
 - Only comment on ADDED lines (marked with + in the diff)
 - Keep comments brief and focused on significant issues only
 - DO NOT add praise or positive comments - only actual issues
+- DO NOT write vague comments like "needs verification" or "requires checking"
 - Use exact line numbers from the diff output
 - ALWAYS use backticks around function names, variables, and code elements
 
