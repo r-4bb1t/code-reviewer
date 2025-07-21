@@ -13,9 +13,20 @@ def _get_common_guidelines() -> str:
 - Avoid obvious or minor style suggestions
 - DO NOT write praise or positive comments - only mention actual issues that need fixing
 - Skip commenting if there are no significant issues to report
-- DO NOT write vague comments like "needs verification" or "requires checking"
-- When you see function calls or dependencies, actively request context to examine them directly
-- Only provide code examples for complex issues that need clarification
+
+CRITICAL - Avoid Vague Comments:
+- NEVER write "확인이 필요합니다", "needs verification", "requires checking"
+- NEVER write "명확하지 않음", "unclear", "should be verified"
+- NEVER write "검토가 필요합니다", "might need", "consider checking"
+- If you see external function calls, actively request context to examine them
+- Only comment when you have CONCRETE evidence of an issue after examining the context
+- Provide specific solutions or code examples, not suggestions to "check" something
+
+Context Gathering Strategy:
+- When you see function calls or dependencies, IMMEDIATELY request context
+- Search for function definitions, usage patterns, and import statements
+- Don't write vague comments about external dependencies - investigate them first
+- If context doesn't provide enough information after 3 iterations, skip commenting on that issue
 
 Follow proper markdown syntax:
 - ALWAYS use backticks (`) around keywords, function names, variable names, and inline code
@@ -37,7 +48,11 @@ def create_initial_prompt(diff: str, language: str) -> str:
 
 Analyze the following diff and request additional context if needed.
 
-If you see function calls or dependencies that you need to examine, actively request context instead of writing vague comments.
+CRITICAL INSTRUCTIONS:
+- If you see function calls or dependencies, IMMEDIATELY request context to examine them
+- DO NOT write any comments about external functions without first gathering their context
+- Only comment on issues you can definitively identify as bugs, security problems, or performance issues
+- When in doubt, request more context rather than writing vague comments
 
 {_get_common_guidelines()}
 
@@ -138,17 +153,37 @@ Original diff:
 def create_final_prompt(diff: str, all_context: dict[str, Any], language: str) -> str:
     lang_instruction = _get_language_instruction(language)
 
+    context_summary = ""
+    if all_context:
+        context_summary = (
+            f"\n\nYou have been provided with comprehensive context including:\n"
+        )
+        for key in all_context.keys():
+            context_summary += f"- {key}\n"
+        context_summary += "\nUse this context to make informed decisions. Do NOT write vague comments about missing information."
+
     return f"""All context gathering is complete. Please write the final code review now. {lang_instruction}
 
-Review Guidelines:
+{context_summary}
+
+FINAL REVIEW GUIDELINES:
 - Focus on SIGNIFICANT issues only (bugs, security, major performance problems)
 - Keep it concise - highlight only the most important improvements
 - Avoid obvious or minor style suggestions
 - DO NOT write praise or positive comments - only mention actual issues that need fixing
 - Skip commenting if there are no significant issues to report
-- DO NOT write vague comments like "needs verification" or "requires checking"
-- When you see function calls or dependencies, actively request context to examine them directly
-- Only provide code examples for complex issues that need clarification
+
+ABSOLUTELY FORBIDDEN - Do NOT write any of these phrases:
+- "확인이 필요합니다" / "needs verification" / "requires checking"
+- "명확하지 않음" / "unclear" / "should be verified"  
+- "검토가 필요합니다" / "might need" / "consider checking"
+- "검증 필요" / "verification needed" / "needs review"
+
+REQUIRED - Only comment when you have:
+- CONCRETE evidence of a bug or security issue
+- SPECIFIC performance problem with measurable impact
+- ACTUAL code that can be improved with a clear solution
+- If you cannot provide a specific solution, DO NOT comment on that issue
 
 {_get_markdown_guidelines()}
 

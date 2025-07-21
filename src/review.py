@@ -356,7 +356,6 @@ def post_review_comments(
 
     repo = os.environ["GITHUB_REPOSITORY"]
 
-    # diff에서 유효한 줄 번호들 추출
     valid_diff_lines = {}
     if diff:
         valid_diff_lines = get_valid_diff_lines(diff)
@@ -368,6 +367,12 @@ def post_review_comments(
         if "file" in comment and "line" in comment and "comment" in comment:
             file_path = comment["file"]
             line_number = comment["line"]
+            comment_text = comment["comment"]
+
+            if not validate_comment_quality(comment_text):
+                print(f"⚠️ Filtered low-quality comment: {comment_text[:50]}...")
+                invalid_comments.append(comment)
+                continue
 
             if (
                 file_path in valid_diff_lines
@@ -377,7 +382,7 @@ def post_review_comments(
                     {
                         "path": file_path,
                         "line": line_number,
-                        "body": comment["comment"],
+                        "body": comment_text,
                         "side": "RIGHT",
                     }
                 )
@@ -387,7 +392,7 @@ def post_review_comments(
     if valid_comments:
         review_data = {
             "commit_id": head_sha,
-            "body": "🤖 AI 코드 리뷰",
+            "body": "⚡ Code review by AI",
             "event": "COMMENT",
             "comments": valid_comments,
         }
@@ -440,6 +445,239 @@ def extract_line_comments_from_text(text: str) -> list[dict]:
         print(f"⚠️ Failed to extract line_comments from text: {e}")
 
     return []
+
+
+def get_function_definition(
+    function_name: str, file_extensions: list[str] | None = None
+) -> dict[str, str]:
+    """
+    함수 정의를 정확하게 찾아서 반환
+    """
+    results = {}
+
+    if file_extensions is None:
+        file_extensions = [
+            "*.py",
+            "*.js",
+            "*.ts",
+            "*.jsx",
+            "*.tsx",
+            "*.java",
+            "*.cpp",
+            "*.c",
+            "*.h",
+            "*.cs",
+            "*.go",
+            "*.rs",
+            "*.rb",
+            "*.php",
+        ]
+
+    for ext in file_extensions:
+        try:
+            if ext == "*.py":
+                # Python 함수 정의 검색
+                cmd = f'find . -name "{ext}" -type f | head -50 | xargs grep -n "def {function_name}\\|class {function_name}" 2>/dev/null || true'
+            elif ext in ["*.js", "*.ts", "*.jsx", "*.tsx"]:
+                # JavaScript/TypeScript 함수 정의 검색
+                cmd = f'find . -name "{ext}" -type f | head -50 | xargs grep -n "function {function_name}\\|const {function_name}\\|class {function_name}\\|{function_name} =" 2>/dev/null || true'
+            else:
+                # 기타 언어
+                cmd = f'find . -name "{ext}" -type f | head -50 | xargs grep -n "{function_name}" 2>/dev/null || true'
+
+            matching_lines = run(cmd).strip()
+            if matching_lines:
+                for line in matching_lines.split("\n"):
+                    if ":" in line:
+                        file_path, line_content = line.split(":", 1)
+                        if file_path not in results:
+                            results[file_path] = get_file_context(
+                                file_path.strip(), None, 10
+                            )[:1000]
+        except Exception as e:
+            print(f"Error searching function definition for {function_name}: {e}")
+            continue
+
+    return results
+
+
+def enhanced_search_code_in_repo(
+    pattern: str, search_type: str = "usage", file_extensions: list[str] | None = None
+) -> dict[str, list[str]]:
+    """
+    향상된 코드 검색 - 사용법, 정의, 임포트 등을 구분하여 검색
+    """
+    results = {}
+
+    if file_extensions is None:
+        file_extensions = [
+            "*.py",
+            "*.js",
+            "*.ts",
+            "*.jsx",
+            "*.tsx",
+            "*.java",
+            "*.cpp",
+            "*.c",
+            "*.h",
+            "*.cs",
+            "*.go",
+            "*.rs",
+            "*.rb",
+            "*.php",
+        ]
+
+    # 검색 패턴을 타입별로 구분
+    search_patterns = []
+
+    if search_type == "definition":
+        search_patterns = [
+            f"def {pattern}",  # Python function
+            f"class {pattern}",  # Python class
+            f"function {pattern}",  # JavaScript function
+            f"const {pattern}",  # JavaScript const function
+            f"{pattern} =",  # Variable assignment
+        ]
+    elif search_type == "import":
+        search_patterns = [
+            f"from .* import.*{pattern}",
+            f"import.*{pattern}",
+            f"require.*{pattern}",
+        ]
+    else:  # usage
+        search_patterns = [pattern]
+
+    for ext in file_extensions:
+        for search_pattern in search_patterns:
+            try:
+                cmd = f'find . -name "{ext}" -type f | head -50 | xargs grep -l "{search_pattern}" 2>/dev/null || true'
+                matching_files = run(cmd).strip()
+                if matching_files:
+                    for file_path in matching_files.split("\n"):
+                        if file_path.strip():
+                            try:
+                                grep_cmd = f'grep -n "{search_pattern}" "{file_path}" | head -10'
+                                matches = run(grep_cmd).strip()
+                                if matches:
+                                    if file_path not in results:
+                                        results[file_path] = []
+                                    results[file_path].extend(matches.split("\n"))
+                            except Exception as e:
+                                print(f"Error processing {file_path}: {e}")
+                                continue
+            except Exception as e:
+                print(f"Error searching for {search_pattern}: {e}")
+                continue
+
+    return results
+
+
+def validate_comment_quality(comment: str, pattern: str = "") -> bool:
+    """
+    댓글의 품질을 검증하여 모호한 댓글을 필터링
+    """
+    # 모호한 표현들
+    vague_phrases = [
+        "확인이 필요합니다",
+        "requires checking",
+        "needs verification",
+        "검토가 필요합니다",
+        "should be verified",
+        "might need",
+        "확인해야 합니다",
+        "should check",
+        "consider checking",
+        "명확하지 않음",
+        "unclear",
+        "not clear",
+        "검증 필요",
+        "verification needed",
+        "needs review",
+        "확인해 주세요",
+        "please check",
+        "please verify",
+        "살펴봐야",
+        "should examine",
+        "should investigate",
+    ]
+
+    comment_lower = comment.lower()
+
+    # 모호한 표현이 있으면 False
+    for phrase in vague_phrases:
+        if phrase.lower() in comment_lower:
+            return False
+
+    # 너무 짧거나 일반적인 댓글 필터링
+    if len(comment.strip()) < 20:
+        return False
+
+    # STRICT 모드 (context가 부족할 때)
+    if pattern == "STRICT":
+        # 더 엄격한 기준 적용
+        strict_requirements = [
+            any(marker in comment for marker in ["```", "`"]),  # 코드 예제 필수
+            any(
+                word in comment_lower
+                for word in [
+                    "버그",
+                    "bug",
+                    "오류",
+                    "error",
+                    "보안",
+                    "security",
+                    "성능",
+                    "performance",
+                ]
+            ),  # 구체적인 이슈 타입 언급 필수
+            len(comment.strip()) > 50,  # 더 긴 설명 필수
+        ]
+        if sum(strict_requirements) < 2:  # 3개 중 최소 2개 충족
+            return False
+
+    # 패턴이 제공되었는데 구체적인 언급이 없으면 False
+    if pattern and pattern != "STRICT" and pattern.lower() not in comment_lower:
+        # 하지만 코드 예제나 구체적인 설명이 있으면 허용
+        if not any(marker in comment for marker in ["```", "`", ":", "=", "(", ")"]):
+            return False
+
+    return True
+
+
+def gather_comprehensive_context(
+    context_requests: list[dict[str, str]],
+) -> dict[str, Any]:
+    """
+    포괄적인 context 수집 - 정의, 사용법, 임포트를 모두 검색
+    """
+    comprehensive_context = {}
+
+    for req in context_requests:
+        pattern = req.get("pattern", "")
+        reason = req.get("reason", "")
+        print(f"  - Comprehensive search for: '{pattern}' (reason: {reason})")
+
+        # 1. 함수/클래스 정의 검색
+        definitions = get_function_definition(pattern)
+        if definitions:
+            comprehensive_context[f"{pattern}_definitions"] = definitions
+
+        # 2. 사용법 검색
+        usage = enhanced_search_code_in_repo(pattern, "usage")
+        if usage:
+            comprehensive_context[f"{pattern}_usage"] = usage
+
+        # 3. 임포트 검색
+        imports = enhanced_search_code_in_repo(pattern, "import")
+        if imports:
+            comprehensive_context[f"{pattern}_imports"] = imports
+
+        # 기존 검색도 유지 (backward compatibility)
+        search_results = search_code_in_repo(pattern)
+        if search_results:
+            comprehensive_context[pattern] = search_results
+
+    return comprehensive_context
 
 
 def review_pr(
@@ -501,21 +739,23 @@ def review_pr(
                 )
                 additional_comments = extract_line_comments_from_text(final_review)
                 if additional_comments:
-                    final_line_comments.extend(additional_comments)
+                    # 최종 리뷰에서도 품질 검증 적용
+                    filtered_comments = []
+                    for comment in additional_comments:
+                        if validate_comment_quality(comment.get("comment", "")):
+                            filtered_comments.append(comment)
+                        else:
+                            print(
+                                f"⚠️ Filtered low-quality final comment: {comment.get('comment', '')[:50]}..."
+                            )
+                    final_line_comments.extend(filtered_comments)
 
             break
 
         print(f"🔍 Processing context requests (iteration {iteration + 1})...")
-        current_context = {}
 
-        for req in context_requests:
-            pattern = req.get("pattern", "")
-            reason = req.get("reason", "")
-            print(f"  - Searching pattern: '{pattern}' (reason: {reason})")
-
-            search_results = search_code_in_repo(pattern)
-            current_context[pattern] = search_results
-
+        # 포괄적인 context 수집 사용
+        current_context = gather_comprehensive_context(context_requests)
         all_context.update(current_context)
 
         context_prompt = create_context_prompt(
@@ -528,12 +768,29 @@ def review_pr(
 
     if iteration >= max_recursion:
         print(f"⚠️ Reached maximum iteration count ({max_recursion}).")
+        if not all_context:
+            print("⚠️ No context gathered. Applying strict filtering for final review.")
+
         final_prompt = create_final_prompt(diff, all_context, language)
+        if not all_context or len(all_context) < 2:
+            final_prompt += "\n\nWARNING: Limited context available. Only comment on issues that are immediately obvious from the diff itself. When in doubt, skip commenting."
+
         messages.append({"role": "user", "content": final_prompt})
         final_review = call_openai(messages, model, openai_api_key, force_json=False)
         additional_comments = extract_line_comments_from_text(final_review)
         if additional_comments:
-            final_line_comments.extend(additional_comments)
+            strict_filtering = not all_context or len(all_context) < 2
+            filtered_comments = []
+            for comment in additional_comments:
+                if validate_comment_quality(
+                    comment.get("comment", ""), "" if not strict_filtering else "STRICT"
+                ):
+                    filtered_comments.append(comment)
+                else:
+                    print(
+                        f"⚠️ Filtered comment due to insufficient context: {comment.get('comment', '')[:50]}..."
+                    )
+            final_line_comments.extend(filtered_comments)
 
     print("📤 Review completed. Posting comments...")
 
@@ -567,7 +824,7 @@ def review_pr(
 
             for file_path, matches in files.items():
                 context_details += f"  - **{file_path}**\n"
-                for match in matches[:3]:  # 처음 3개만 표시
+                for match in matches[:3]:
                     context_details += f"    ```\n    {match}\n    ```\n"
                 if len(matches) > 3:
                     context_details += f"    ... 및 {len(matches) - 3}개 추가 매치\n"
