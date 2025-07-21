@@ -11,6 +11,10 @@ inputs:
     description: "OpenAI API model."
     required: false
     default: "gpt-4o"
+  language:
+    description: "Language for the review comments (e.g., Korean, English, Japanese)"
+    required: false
+    default: "Korean"
   exclude:
     description: "Glob patterns to exclude files from the diff analysis"
     required: false
@@ -35,6 +39,7 @@ runs:
         GITHUB_TOKEN: ${{ inputs.GITHUB_TOKEN }}
         OPENAI_API_KEY: ${{ inputs.OPENAI_API_KEY }}
         OPENAI_API_MODEL: ${{ inputs.OPENAI_API_MODEL }}
+        LANGUAGE: ${{ inputs.language }}
         EXCLUDE: ${{ inputs.exclude }}
         MAX_RECURSION: ${{ inputs.MAX_RECURSION }}
         PYTHONPATH: ${{ env.PYTHONPATH }}:$GITHUB_ACTION_PATH

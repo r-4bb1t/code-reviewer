@@ -26,6 +26,16 @@ def get_pr_number() -> str:
     return str(event["pull_request"]["number"])
 
 
+def get_pr_head_sha() -> str:
+    event_path = os.environ.get("GITHUB_EVENT_PATH")
+    if not event_path or not os.path.exists(event_path):
+        raise RuntimeError("GITHUB_EVENT_PATH not found")
+
+    with open(event_path) as f:
+        event = json.load(f)
+    return event["pull_request"]["head"]["sha"]
+
+
 def get_base_branch() -> str:
     event_path = os.environ.get("GITHUB_EVENT_PATH")
     if not event_path or not os.path.exists(event_path):
@@ -130,6 +140,60 @@ def get_changed_files(exclude: str = "") -> list[str]:
                 return [f for f in files if f.strip()]
 
 
+def parse_diff_with_line_numbers(diff: str) -> dict[str, list[dict]]:
+    """
+    diff를 파싱하여 파일별로 변경된 라인 정보를 반환
+    """
+    file_changes = {}
+    current_file = None
+    current_hunk = None
+
+    for line in diff.split("\n"):
+        if line.startswith("diff --git"):
+            # 새 파일 시작
+            match = re.search(r"diff --git a/(.*?) b/(.*?)$", line)
+            if match:
+                current_file = match.group(2)
+                file_changes[current_file] = []
+
+        elif line.startswith("@@"):
+            # 새 hunk 시작
+            match = re.search(r"@@ -(\d+),?\d* \+(\d+),?\d* @@", line)
+            if match and current_file:
+                current_hunk = {
+                    "old_start": int(match.group(1)),
+                    "new_start": int(match.group(2)),
+                    "lines": [],
+                }
+                file_changes[current_file].append(current_hunk)
+
+        elif current_hunk is not None and current_file:
+            # 라인 내용
+            if line.startswith("+") and not line.startswith("+++"):
+                # 추가된 라인
+                new_line_num = current_hunk["new_start"] + len(
+                    [l for l in current_hunk["lines"] if l["type"] in ["+", " "]]
+                )
+                current_hunk["lines"].append(
+                    {"type": "+", "content": line[1:], "line_number": new_line_num}
+                )
+            elif line.startswith("-") and not line.startswith("---"):
+                # 삭제된 라인
+                current_hunk["lines"].append(
+                    {"type": "-", "content": line[1:], "line_number": None}
+                )
+            elif line.startswith(" "):
+                # 변경되지 않은 라인
+                new_line_num = current_hunk["new_start"] + len(
+                    [l for l in current_hunk["lines"] if l["type"] in ["+", " "]]
+                )
+                current_hunk["lines"].append(
+                    {"type": " ", "content": line[1:], "line_number": new_line_num}
+                )
+
+    return file_changes
+
+
 def search_code_in_repo(
     pattern: str, file_extensions: list[str] | None = None
 ) -> dict[str, list[str]]:
@@ -199,22 +263,31 @@ def get_file_context(
         return f"Error reading {file_path}: {str(e)}"
 
 
-def create_initial_prompt(diff: str) -> str:
-    return f"""당신은 코드 리뷰 AI입니다.
+def create_initial_prompt(diff: str, language: str) -> str:
+    lang_instruction = f"Answer in {language}." if language.lower() != "english" else ""
 
-다음 diff를 분석하고 필요한 경우 추가 컨텍스트를 요청해주세요.
+    return f"""You are a code review AI. {lang_instruction}
 
-응답은 반드시 JSON 형식으로 해주세요:
+Analyze the following diff and request additional context if needed.
+
+Please respond in JSON format:
 
 {{
   "needs_context": true/false,
   "context_requests": [
     {{
-      "pattern": "검색할 패턴 (함수명, 클래스명, 변수명 등)",
-      "reason": "왜 이 정보가 필요한지"
+      "pattern": "pattern to search (function names, class names, variable names, etc.)",
+      "reason": "why this information is needed"
     }}
   ],
-  "review": "만약 추가 컨텍스트가 불필요하다면 여기에 바로 코드 리뷰 작성"
+  "review": "if no additional context is needed, write the code review directly here",
+  "line_comments": [
+    {{
+      "file": "filename",
+      "line": line_number,
+      "comment": "specific review comment for that line"
+    }}
+  ]
 }}
 
 ```diff
@@ -223,14 +296,16 @@ def create_initial_prompt(diff: str) -> str:
 
 
 def create_context_prompt(
-    diff: str, context_data: dict[str, Any], iteration: int
+    diff: str, context_data: dict[str, Any], iteration: int, language: str
 ) -> str:
+    lang_instruction = f"Answer in {language}." if language.lower() != "english" else ""
+
     context_text = ""
     for pattern, data in context_data.items():
-        context_text += f"\n=== 패턴 '{pattern}'에 대한 검색 결과 ===\n"
+        context_text += f"\n=== Search results for pattern '{pattern}' ===\n"
         if isinstance(data, dict):
             for file_path, matches in data.items():
-                context_text += f"\n파일: {file_path}\n"
+                context_text += f"\nFile: {file_path}\n"
                 if isinstance(matches, list):
                     for match in matches:
                         context_text += f"  {match}\n"
@@ -239,43 +314,53 @@ def create_context_prompt(
         else:
             context_text += f"{data}\n"
 
-    return f"""이전 요청에 대한 추가 컨텍스트를 제공합니다 (반복 {iteration}).
+    return f"""Additional context for previous requests is provided (iteration {iteration}). {lang_instruction}
 
 {context_text}
 
-이 정보를 바탕으로, 더 필요한 컨텍스트가 있다면 요청하거나, 충분하다면 최종 코드 리뷰를 제공해주세요.
+Based on this information, please request more context if needed, or provide the final code review if sufficient.
 
-응답은 반드시 JSON 형식으로 해주세요:
+Please respond in JSON format:
 
 {{
   "needs_context": true/false,
   "context_requests": [
     {{
-      "pattern": "추가 검색 패턴",
-      "reason": "이유"
+      "pattern": "additional search pattern",
+      "reason": "reason"
     }}
   ],
-  "review": "최종 코드 리뷰 (needs_context가 false일 때)"
+  "review": "final code review (when needs_context is false)",
+  "line_comments": [
+    {{
+      "file": "filename",
+      "line": line_number,
+      "comment": "specific review comment for that line"
+    }}
+  ]
 }}
 
-원본 diff:
+Original diff:
 ```diff
 {diff}
 ```"""
 
 
-def parse_context_requests(response: str) -> tuple[list[dict[str, str]], str]:
+def parse_context_requests(
+    response: str,
+) -> tuple[list[dict[str, str]], str, list[dict]]:
     try:
         response_json = json.loads(response)
 
         needs_context = response_json.get("needs_context", False)
         context_requests = response_json.get("context_requests", [])
         review = response_json.get("review", "")
+        line_comments = response_json.get("line_comments", [])
 
         if not needs_context:
-            return [], review
+            return [], review, line_comments
 
-        return context_requests, ""
+        return context_requests, "", line_comments
 
     except json.JSONDecodeError as e:
         print(f"⚠️ JSON 파싱 실패, 텍스트 파싱으로 대체: {e}")
@@ -307,25 +392,41 @@ def parse_context_requests(response: str) -> tuple[list[dict[str, str]], str]:
         if current_request and "pattern" in current_request:
             requests.append(current_request)
 
-        return requests, ""
+        return requests, "", []
 
 
-def create_final_prompt(diff: str, all_context: dict[str, Any]) -> str:
-    return f"""모든 컨텍스트 수집이 완료되었습니다. 이제 최종 코드 리뷰를 작성해주세요.
+def create_final_prompt(diff: str, all_context: dict[str, Any], language: str) -> str:
+    lang_instruction = f"Answer in {language}." if language.lower() != "english" else ""
 
-다음 사항들을 포함해주세요:
-- 코드 품질 및 베스트 프랙티스
-- 잠재적 버그나 보안 이슈
-- 성능 개선 사항
-- 코드 가독성 및 유지보수성
+    return f"""All context gathering is complete. Please write the final code review now. {lang_instruction}
 
-마크다운 형식으로 응답해주세요.
+Please include the following:
+- Code quality and best practices
+- Potential bugs or security issues
+- Performance improvements
+- Code readability and maintainability
+
+Please respond in markdown format.
+
+If you have detailed comments for specific lines, also provide the following JSON format:
+
+```json
+{{
+  "line_comments": [
+    {{
+      "file": "filename",
+      "line": line_number,
+      "comment": "specific review comment for that line"
+    }}
+  ]
+}}
+```
 
 ```diff
 {diff}
 ```
 
-컨텍스트 정보:
+Context information:
 {json.dumps(all_context, ensure_ascii=False, indent=2)}"""
 
 
@@ -340,6 +441,58 @@ def post_comment(github_token: str, body: str, pr_number: str):
     response = requests.post(url, json={"body": body}, headers=headers)
     if response.status_code >= 300:
         raise RuntimeError(f"Failed to post comment: {response.text}")
+
+
+def post_review_comments(
+    github_token: str, pr_number: str, head_sha: str, line_comments: list[dict]
+):
+    """
+    특정 줄에 리뷰 댓글을 답니다
+    """
+    if not line_comments:
+        return
+
+    repo = os.environ["GITHUB_REPOSITORY"]
+
+    comments = []
+    for comment in line_comments:
+        if "file" in comment and "line" in comment and "comment" in comment:
+            comments.append(
+                {
+                    "path": comment["file"],
+                    "line": comment["line"],
+                    "body": comment["comment"],
+                }
+            )
+
+    if not comments:
+        return
+
+    review_data = {
+        "commit_id": head_sha,
+        "body": "🤖 AI 코드 리뷰",
+        "event": "COMMENT",
+        "comments": comments,
+    }
+
+    url = f"https://api.github.com/repos/{repo}/pulls/{pr_number}/reviews"
+    headers = {
+        "Authorization": f"token {github_token}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+
+    response = requests.post(url, json=review_data, headers=headers)
+    if response.status_code >= 300:
+        print(f"⚠️ 줄별 댓글 작성 실패: {response.text}")
+        # 줄별 댓글 실패 시 일반 댓글로 폴백
+        fallback_body = "🤖 AI 코드 리뷰 (줄별 댓글)\n\n"
+        for comment in line_comments:
+            fallback_body += f"**{comment.get('file', 'Unknown file')}:{comment.get('line', 'Unknown line')}**\n"
+            fallback_body += f"{comment.get('comment', '')}\n\n"
+        post_comment(github_token, fallback_body, pr_number)
+    else:
+        print(f"✅ {len(comments)}개의 줄별 댓글이 작성되었습니다.")
 
 
 def call_openai(
@@ -360,10 +513,27 @@ def call_openai(
     return response.choices[0].message.content
 
 
+def extract_line_comments_from_text(text: str) -> list[dict]:
+    """
+    텍스트에서 JSON 형식의 line_comments를 추출
+    """
+    try:
+        # JSON 블록 찾기
+        json_match = re.search(r"```json\s*(\{.*?\})\s*```", text, re.DOTALL)
+        if json_match:
+            json_data = json.loads(json_match.group(1))
+            return json_data.get("line_comments", [])
+    except Exception as e:
+        print(f"⚠️ 텍스트에서 line_comments 추출 실패: {e}")
+
+    return []
+
+
 def review_pr(
     github_token: str,
     openai_api_key: str,
     model: str = "gpt-4o",
+    language: str = "Korean",
     exclude: str = "",
     max_recursion: int = 3,
 ):
@@ -375,20 +545,32 @@ def review_pr(
 
     print("🧠 OpenAI로 초기 분석 전송 중...")
 
+    system_message = (
+        f"You are a professional software engineer reviewing pull requests. Answer in {language}."
+        if language.lower() != "english"
+        else "You are a professional software engineer reviewing pull requests."
+    )
+
     messages = [
         {
             "role": "system",
-            "content": "당신은 전문 소프트웨어 엔지니어로서 pull request를 리뷰하고 있습니다.",
+            "content": system_message,
         },
-        {"role": "user", "content": create_initial_prompt(diff)},
+        {"role": "user", "content": create_initial_prompt(diff, language)},
     ]
 
     all_context = {}
     iteration = 0
+    final_line_comments = []
 
     while iteration < max_recursion:
         response = call_openai(messages, model, openai_api_key, force_json=True)
-        context_requests, review_content = parse_context_requests(response)
+        context_requests, review_content, line_comments = parse_context_requests(
+            response
+        )
+
+        if line_comments:
+            final_line_comments.extend(line_comments)
 
         if not context_requests:
             print(f"✅ 컨텍스트 수집 완료 (반복 {iteration}). 최종 리뷰 작성 중...")
@@ -396,12 +578,16 @@ def review_pr(
             if review_content:
                 final_review = review_content
             else:
-                final_prompt = create_final_prompt(diff, all_context)
+                final_prompt = create_final_prompt(diff, all_context, language)
                 messages.append({"role": "assistant", "content": response})
                 messages.append({"role": "user", "content": final_prompt})
                 final_review = call_openai(
                     messages, model, openai_api_key, force_json=False
                 )
+                # 최종 리뷰에서도 line_comments 추출 시도
+                additional_comments = extract_line_comments_from_text(final_review)
+                if additional_comments:
+                    final_line_comments.extend(additional_comments)
 
             break
 
@@ -418,7 +604,9 @@ def review_pr(
 
         all_context.update(current_context)
 
-        context_prompt = create_context_prompt(diff, current_context, iteration + 1)
+        context_prompt = create_context_prompt(
+            diff, current_context, iteration + 1, language
+        )
         messages.append({"role": "assistant", "content": response})
         messages.append({"role": "user", "content": context_prompt})
 
@@ -426,19 +614,36 @@ def review_pr(
 
     if iteration >= max_recursion:
         print(f"⚠️ 최대 반복 횟수({max_recursion})에 도달했습니다.")
-        final_prompt = create_final_prompt(diff, all_context)
+        final_prompt = create_final_prompt(diff, all_context, language)
         messages.append({"role": "user", "content": final_prompt})
         final_review = call_openai(messages, model, openai_api_key, force_json=False)
+        # 최종 리뷰에서도 line_comments 추출 시도
+        additional_comments = extract_line_comments_from_text(final_review)
+        if additional_comments:
+            final_line_comments.extend(additional_comments)
 
     print("📤 리뷰 완료. 댓글 작성 중...")
 
     pr_number = get_pr_number()
-    comment_body = f"### 🤖 AI 코드 리뷰 (모델: {model})\n\n{final_review}"
+    head_sha = get_pr_head_sha()
+
+    # 줄별 댓글 작성
+    if final_line_comments:
+        print(f"📌 {len(final_line_comments)}개의 줄별 댓글 작성 중...")
+        post_review_comments(github_token, pr_number, head_sha, final_line_comments)
+
+    # 전체 리뷰 댓글 작성
+    comment_body = (
+        f"### 🤖 AI 코드 리뷰 (모델: {model}, 언어: {language})\n\n{final_review}"
+    )
 
     if iteration > 0:
         comment_body += (
             f"\n\n---\n*이 리뷰는 {iteration}번의 컨텍스트 수집을 통해 작성되었습니다.*"
         )
+
+    if final_line_comments:
+        comment_body += f"\n\n---\n*{len(final_line_comments)}개의 줄별 상세 댓글이 작성되었습니다.*"
 
     post_comment(github_token, comment_body, pr_number)
     print("✅ 리뷰 댓글이 게시되었습니다.")
