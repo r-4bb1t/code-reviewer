@@ -281,7 +281,7 @@ def parse_context_requests(
         return context_requests, "", line_comments
 
     except json.JSONDecodeError as e:
-        print(f"⚠️ JSON 파싱 실패, 텍스트 파싱으로 대체: {e}")
+        print(f"⚠️ JSON parsing failed, falling back to text parsing: {e}")
 
         requests = []
         lines = response.split("\n")
@@ -367,7 +367,7 @@ def post_review_comments(
 
     response = requests.post(url, json=review_data, headers=headers)
     if response.status_code >= 300:
-        print(f"⚠️ 줄별 댓글 작성 실패: {response.text}")
+        print(f"⚠️ Failed to post line comments: {response.text}")
         # 줄별 댓글 실패 시 일반 댓글로 폴백
         fallback_body = "🤖 AI 코드 리뷰 (줄별 댓글)\n\n"
         for comment in line_comments:
@@ -375,7 +375,7 @@ def post_review_comments(
             fallback_body += f"{comment.get('comment', '')}\n\n"
         post_comment(github_token, fallback_body, pr_number)
     else:
-        print(f"✅ {len(comments)}개의 줄별 댓글이 작성되었습니다.")
+        print(f"✅ {len(comments)} line comments posted successfully.")
 
 
 def call_openai(
@@ -407,7 +407,7 @@ def extract_line_comments_from_text(text: str) -> list[dict]:
             json_data = json.loads(json_match.group(1))
             return json_data.get("line_comments", [])
     except Exception as e:
-        print(f"⚠️ 텍스트에서 line_comments 추출 실패: {e}")
+        print(f"⚠️ Failed to extract line_comments from text: {e}")
 
     return []
 
@@ -420,13 +420,13 @@ def review_pr(
     exclude: str = "",
     max_recursion: int = 3,
 ):
-    print("📥 diff 가져오는 중...")
+    print("📥 Fetching diff...")
     diff = get_diff(exclude)
     if not diff.strip():
-        print("✅ diff가 없어서 리뷰를 건너뜁니다.")
+        print("✅ No diff found, skipping review.")
         return
 
-    print("🧠 OpenAI로 초기 분석 전송 중...")
+    print("🧠 Sending initial analysis to OpenAI...")
 
     system_message = (
         f"You are a professional software engineer reviewing pull requests. Answer in {language}."
@@ -456,7 +456,9 @@ def review_pr(
             final_line_comments.extend(line_comments)
 
         if not context_requests:
-            print(f"✅ 컨텍스트 수집 완료 (반복 {iteration}). 최종 리뷰 작성 중...")
+            print(
+                f"✅ Context collection completed (iteration {iteration}). Writing final review..."
+            )
 
             if review_content:
                 final_review = review_content
@@ -467,20 +469,19 @@ def review_pr(
                 final_review = call_openai(
                     messages, model, openai_api_key, force_json=False
                 )
-                # 최종 리뷰에서도 line_comments 추출 시도
                 additional_comments = extract_line_comments_from_text(final_review)
                 if additional_comments:
                     final_line_comments.extend(additional_comments)
 
             break
 
-        print(f"🔍 컨텍스트 요청 처리 중 (반복 {iteration + 1})...")
+        print(f"🔍 Processing context requests (iteration {iteration + 1})...")
         current_context = {}
 
         for req in context_requests:
             pattern = req.get("pattern", "")
             reason = req.get("reason", "")
-            print(f"  - 패턴 검색: '{pattern}' (이유: {reason})")
+            print(f"  - Searching pattern: '{pattern}' (reason: {reason})")
 
             search_results = search_code_in_repo(pattern)
             current_context[pattern] = search_results
@@ -496,7 +497,7 @@ def review_pr(
         iteration += 1
 
     if iteration >= max_recursion:
-        print(f"⚠️ 최대 반복 횟수({max_recursion})에 도달했습니다.")
+        print(f"⚠️ Reached maximum iteration count ({max_recursion}).")
         final_prompt = create_final_prompt(diff, all_context, language)
         messages.append({"role": "user", "content": final_prompt})
         final_review = call_openai(messages, model, openai_api_key, force_json=False)
@@ -505,26 +506,24 @@ def review_pr(
         if additional_comments:
             final_line_comments.extend(additional_comments)
 
-    print("📤 리뷰 완료. 댓글 작성 중...")
+    print("📤 Review completed. Posting comments...")
 
     pr_number = get_pr_number()
     head_sha = get_pr_head_sha()
 
     if final_line_comments:
-        print(f"📌 {len(final_line_comments)}개의 줄별 댓글 작성 중...")
+        print(f"📌 Posting {len(final_line_comments)} line comments...")
         post_review_comments(github_token, pr_number, head_sha, final_line_comments)
 
-    comment_body = (
-        f"### 🤖 AI 코드 리뷰 (모델: {model}, 언어: {language})\n\n{final_review}"
-    )
+    comment_body = f"""### 🤖 AI Code Review
 
-    if iteration > 0:
-        comment_body += (
-            f"\n\n---\n*이 리뷰는 {iteration}번의 컨텍스트 수집을 통해 작성되었습니다.*"
-        )
+| 항목 | 값 |
+|------|-----|
+| Model | {model} |
+| Language | {language} |
+| Iterations | {iteration} |
 
-    if final_line_comments:
-        comment_body += f"\n\n---\n*{len(final_line_comments)}개의 줄별 상세 댓글이 작성되었습니다.*"
+{final_review}"""
 
     post_comment(github_token, comment_body, pr_number)
-    print("✅ 리뷰 댓글이 게시되었습니다.")
+    print("✅ Review comment posted.")
