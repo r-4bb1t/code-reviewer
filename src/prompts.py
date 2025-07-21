@@ -71,6 +71,11 @@ Based on this information, please request more context if needed, or provide the
 When providing code review feedback, always include specific code examples to illustrate your suggestions.
 For example, if suggesting an improvement, show both the problematic code and the improved version.
 
+Follow proper markdown syntax:
+- Use backticks (`) around keywords, function names, variable names, and inline code
+- Use triple backticks (```) for code blocks and always specify the language (e.g., ```python, ```javascript)
+- Use proper markdown formatting for emphasis and structure
+
 Please respond in JSON format:
 
 {{
@@ -113,7 +118,10 @@ IMPORTANT: For each suggestion or issue you identify, provide concrete code exam
 2. The improved version of the code
 3. Brief explanation of why the change is beneficial
 
-Use markdown code blocks with appropriate language syntax highlighting.
+Follow proper markdown syntax:
+- Use backticks (`) around keywords, function names, variable names, and inline code
+- Use triple backticks (```) for code blocks and always specify the language (e.g., ```python, ```javascript)
+- Use proper markdown formatting for emphasis and structure
 
 Example format:
 ```python
