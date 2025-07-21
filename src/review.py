@@ -349,7 +349,6 @@ def call_openai(
     kwargs = {
         "model": model,
         "messages": messages,
-        "temperature": 0.3,
         "max_completion_tokens": 5000,
     }
 
