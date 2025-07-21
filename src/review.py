@@ -28,15 +28,35 @@ def get_pr_number() -> str:
 
 def get_diff(exclude: str = "") -> str:
     run("git fetch origin main")
-    exclude_args = f":(exclude){exclude}" if exclude else ""
-    cmd = f'git diff origin/main...HEAD -- . ":(exclude)dist/**" {exclude_args}'
+    exclude_args = ""
+    if exclude:
+        exclude_patterns = [
+            pattern.strip() for pattern in exclude.split(",") if pattern.strip()
+        ]
+        exclude_args = " ".join(
+            [f'":(exclude){pattern}"' for pattern in exclude_patterns]
+        )
+
+    cmd = 'git diff origin/main...HEAD -- . ":(exclude)dist/**"'
+    if exclude_args:
+        cmd += f" {exclude_args}"
     return run(cmd)
 
 
 def get_changed_files(exclude: str = "") -> list[str]:
     run("git fetch origin main")
-    exclude_args = f":(exclude){exclude}" if exclude else ""
-    cmd = f'git diff --name-only origin/main...HEAD -- . ":(exclude)dist/**" {exclude_args}'
+    exclude_args = ""
+    if exclude:
+        exclude_patterns = [
+            pattern.strip() for pattern in exclude.split(",") if pattern.strip()
+        ]
+        exclude_args = " ".join(
+            [f'":(exclude){pattern}"' for pattern in exclude_patterns]
+        )
+
+    cmd = 'git diff --name-only origin/main...HEAD -- . ":(exclude)dist/**"'
+    if exclude_args:
+        cmd += f" {exclude_args}"
     files = run(cmd).strip().split("\n")
     return [f for f in files if f.strip()]
 
@@ -76,9 +96,11 @@ def search_code_in_repo(
                             matches = run(grep_cmd).strip()
                             if matches:
                                 results[file_path] = matches.split("\n")
-                        except:
+                        except Exception as e:
+                            print(f"Error processing {file_path}: {e}")
                             continue
-        except:
+        except Exception as e:
+            print(f"Error searching for {pattern}: {e}")
             continue
 
     return results
