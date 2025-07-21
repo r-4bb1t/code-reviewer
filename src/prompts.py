@@ -7,9 +7,11 @@ def _get_language_instruction(language: str) -> str:
 
 
 def _get_common_guidelines() -> str:
-    return """When providing code review feedback, include specific code examples to illustrate your suggestions if necessary. 
-For example, if suggesting an improvement, show both the problematic code and the improved version.
-Consider suggesting multiple improvements for the same code.
+    return """Review Guidelines:
+- Focus on SIGNIFICANT issues only (bugs, security, major performance problems)
+- Keep it concise - highlight only the most important improvements
+- Avoid obvious or minor style suggestions
+- Only provide code examples for complex issues that need clarification
 
 Follow proper markdown syntax:
 - Use backticks (`) around keywords, function names, variable names, and inline code
@@ -48,15 +50,14 @@ Please respond in JSON format:
     {{
       "file": "filename", 
       "line": line_number,
-      "comment": "specific review comment for that line with code examples if applicable"
+      "comment": "brief, specific comment for that line"
     }}
   ]
 
 IMPORTANT for line_comments:
-- Only provide line numbers for lines that are ADDED (marked with + in the diff)
-- Do NOT provide line numbers for unchanged lines or deleted lines
-- Use the exact line number as shown in the diff output
-- If you want to comment on unchanged code, include it in the general review instead
+- Only comment on ADDED lines (marked with + in the diff)
+- Keep comments brief and focused on significant issues only
+- Use exact line numbers from the diff output
 }}
 
 ```diff
@@ -89,10 +90,7 @@ def create_context_prompt(
 
 Based on this information, please request more context if needed, or provide the final code review if sufficient.
 
-When providing code review feedback, always include specific code examples to illustrate your suggestions.
-For example, if suggesting an improvement, show both the problematic code and the improved version.
-
-{_get_markdown_guidelines()}
+{_get_common_guidelines()}
 
 Please respond in JSON format:
 
@@ -109,15 +107,14 @@ Please respond in JSON format:
     {{
       "file": "filename",
       "line": line_number,
-      "comment": "specific review comment for that line with code examples if applicable"
+      "comment": "brief, specific comment for that line"
     }}
   ]
 
 IMPORTANT for line_comments:
-- Only provide line numbers for lines that are ADDED (marked with + in the diff)
-- Do NOT provide line numbers for unchanged lines or deleted lines
-- Use the exact line number as shown in the diff output
-- If you want to comment on unchanged code, include it in the general review instead
+- Only comment on ADDED lines (marked with + in the diff)
+- Keep comments brief and focused on significant issues only
+- Use exact line numbers from the diff output
 }}
 
 Original diff:
@@ -131,16 +128,11 @@ def create_final_prompt(diff: str, all_context: dict[str, Any], language: str) -
 
     return f"""All context gathering is complete. Please write the final code review now. {lang_instruction}
 
-Please include the following:
-- Code quality and best practices
-- Potential bugs or security issues
-- Performance improvements
-- Code readability and maintainability
-
-IMPORTANT: For each suggestion or issue you identify, provide concrete code examples showing:
-1. The current problematic code (if applicable)
-2. The improved version of the code
-3. Brief explanation of why the change is beneficial
+Review Guidelines:
+- Focus on SIGNIFICANT issues only (bugs, security, major performance problems)
+- Keep it concise - highlight only the most important improvements
+- Avoid obvious or minor style suggestions
+- Only provide code examples for complex issues that need clarification
 
 {_get_markdown_guidelines()}
 
@@ -170,10 +162,9 @@ If you have detailed comments for specific lines, also provide the following JSO
 ```
 
 IMPORTANT for line_comments:
-- Only provide line numbers for lines that are ADDED (marked with + in the diff)
-- Do NOT provide line numbers for unchanged lines or deleted lines
-- Use the exact line number as shown in the diff output
-- If you want to comment on unchanged code, include it in the general review instead
+- Only comment on ADDED lines (marked with + in the diff)
+- Keep comments brief and focused on significant issues only
+- Use exact line numbers from the diff output
 
 ```diff
 {diff}
