@@ -515,14 +515,44 @@ def review_pr(
         print(f"📌 Posting {len(final_line_comments)} line comments...")
         post_review_comments(github_token, pr_number, head_sha, final_line_comments)
 
+    context_summary = ""
+    context_details = ""
+    if all_context:
+        total_patterns = len(all_context)
+        total_files = sum(len(files) for files in all_context.values())
+        total_matches = sum(
+            len(matches) for files in all_context.values() for matches in files.values()
+        )
+        context_summary = (
+            f"{total_patterns}개 패턴, {total_files}개 파일, {total_matches}개 매치"
+        )
+
+        # 자세한 context 정보 생성
+        context_details = "\n<details>\n<summary>🔍 Context 상세 정보</summary>\n\n"
+        for pattern, files in all_context.items():
+            context_details += f"**패턴: `{pattern}`**\n"
+            if not files:
+                context_details += "  - 매치 없음\n\n"
+                continue
+
+            for file_path, matches in files.items():
+                context_details += f"  - **{file_path}**\n"
+                for match in matches[:3]:  # 처음 3개만 표시
+                    context_details += f"    ```\n    {match}\n    ```\n"
+                if len(matches) > 3:
+                    context_details += f"    ... 및 {len(matches) - 3}개 추가 매치\n"
+                context_details += "\n"
+        context_details += "</details>\n"
+    else:
+        context_summary = "없음"
+
     comment_body = f"""### 🤖 AI Code Review
 
-| 항목 | 값 |
-|------|-----|
-| Model | {model} |
-| Language | {language} |
-| Iterations | {iteration} |
+| Model | Language | Iterations | Context |
+| --- | --- | --- | --- |
+| {model} | {language} | {iteration} | {context_summary} |
 
+{context_details}
 {final_review}"""
 
     post_comment(github_token, comment_body, pr_number)
