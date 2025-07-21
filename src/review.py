@@ -350,7 +350,7 @@ def call_openai(
         "model": model,
         "messages": messages,
         "temperature": 0.3,
-        "max_tokens": 2000,
+        "max_completion_tokens": 5000,
     }
 
     if force_json:
