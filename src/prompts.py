@@ -11,6 +11,8 @@ def _get_common_guidelines() -> str:
 - Focus on SIGNIFICANT issues only (bugs, security, major performance problems)
 - Keep it concise - highlight only the most important improvements
 - Avoid obvious or minor style suggestions
+- DO NOT write praise or positive comments - only mention actual issues that need fixing
+- Skip commenting if there are no significant issues to report
 - Only provide code examples for complex issues that need clarification
 
 Follow proper markdown syntax:
@@ -21,7 +23,7 @@ Follow proper markdown syntax:
 
 def _get_markdown_guidelines() -> str:
     return """Follow proper markdown syntax:
-- Use backticks (`) around keywords, function names, variable names, and inline code
+- ALWAYS use backticks (`) around keywords, function names, variable names, and inline code
 - Use triple backticks (```) for code blocks and always specify the language (e.g., ```python, ```javascript)
 - Use proper markdown formatting for emphasis and structure"""
 
@@ -57,7 +59,9 @@ Please respond in JSON format:
 IMPORTANT for line_comments:
 - Only comment on ADDED lines (marked with + in the diff)
 - Keep comments brief and focused on significant issues only
+- DO NOT add praise or positive comments - only actual issues
 - Use exact line numbers from the diff output
+- ALWAYS use backticks around function names, variables, and code elements
 }}
 
 ```diff
@@ -114,7 +118,9 @@ Please respond in JSON format:
 IMPORTANT for line_comments:
 - Only comment on ADDED lines (marked with + in the diff)
 - Keep comments brief and focused on significant issues only
+- DO NOT add praise or positive comments - only actual issues
 - Use exact line numbers from the diff output
+- ALWAYS use backticks around function names, variables, and code elements
 }}
 
 Original diff:
@@ -132,6 +138,8 @@ Review Guidelines:
 - Focus on SIGNIFICANT issues only (bugs, security, major performance problems)
 - Keep it concise - highlight only the most important improvements
 - Avoid obvious or minor style suggestions
+- DO NOT write praise or positive comments - only mention actual issues that need fixing
+- Skip commenting if there are no significant issues to report
 - Only provide code examples for complex issues that need clarification
 
 {_get_markdown_guidelines()}
@@ -164,7 +172,9 @@ If you have detailed comments for specific lines, also provide the following JSO
 IMPORTANT for line_comments:
 - Only comment on ADDED lines (marked with + in the diff)
 - Keep comments brief and focused on significant issues only
+- DO NOT add praise or positive comments - only actual issues
 - Use exact line numbers from the diff output
+- ALWAYS use backticks around function names, variables, and code elements
 
 ```diff
 {diff}

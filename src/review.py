@@ -151,14 +151,12 @@ def parse_diff_with_line_numbers(diff: str) -> dict[str, list[dict]]:
 
     for line in diff.split("\n"):
         if line.startswith("diff --git"):
-            # 새 파일 시작
             match = re.search(r"diff --git a/(.*?) b/(.*?)$", line)
             if match:
                 current_file = match.group(2)
                 file_changes[current_file] = []
 
         elif line.startswith("@@"):
-            # 새 hunk 시작
             match = re.search(r"@@ -(\d+),?\d* \+(\d+),?\d* @@", line)
             if match and current_file:
                 current_hunk = {
@@ -169,9 +167,7 @@ def parse_diff_with_line_numbers(diff: str) -> dict[str, list[dict]]:
                 file_changes[current_file].append(current_hunk)
 
         elif current_hunk is not None and current_file:
-            # 라인 내용
             if line.startswith("+") and not line.startswith("+++"):
-                # 추가된 라인
                 new_line_num = current_hunk["new_start"] + len(
                     [l for l in current_hunk["lines"] if l["type"] in ["+", " "]]
                 )
@@ -373,7 +369,6 @@ def post_review_comments(
             file_path = comment["file"]
             line_number = comment["line"]
 
-            # diff에 포함된 유효한 줄인지 확인
             if (
                 file_path in valid_diff_lines
                 and line_number in valid_diff_lines[file_path]
@@ -383,13 +378,12 @@ def post_review_comments(
                         "path": file_path,
                         "line": line_number,
                         "body": comment["comment"],
-                        "side": "RIGHT",  # 새로 추가된 줄에 대한 댓글
+                        "side": "RIGHT",
                     }
                 )
             else:
                 invalid_comments.append(comment)
 
-    # 유효한 줄별 댓글이 있으면 GitHub API로 전송
     if valid_comments:
         review_data = {
             "commit_id": head_sha,
@@ -408,26 +402,11 @@ def post_review_comments(
         response = requests.post(url, json=review_data, headers=headers)
         if response.status_code >= 300:
             print(f"⚠️ Failed to post line comments: {response.text}")
-            # 실패 시 모든 댓글을 invalid_comments에 추가
-            invalid_comments.extend(
-                [
-                    {"file": c["path"], "line": c["line"], "comment": c["body"]}
-                    for c in valid_comments
-                ]
-            )
         else:
             print(f"✅ {len(valid_comments)} line comments posted successfully.")
 
-    # 유효하지 않은 줄의 댓글들은 일반 댓글로 처리
     if invalid_comments:
-        print(
-            f"📝 {len(invalid_comments)} comments posted as general comment (not on specific lines)"
-        )
-        fallback_body = "🤖 AI 코드 리뷰 (일반 댓글)\n\n"
-        for comment in invalid_comments:
-            fallback_body += f"**{comment.get('file', 'Unknown file')}:{comment.get('line', 'Unknown line')}**\n"
-            fallback_body += f"{comment.get('comment', '')}\n\n"
-        post_comment(github_token, fallback_body, pr_number)
+        print(f"⚠️ {len(invalid_comments)} comments ignored (not on valid diff lines)")
 
 
 def call_openai(
@@ -453,7 +432,6 @@ def extract_line_comments_from_text(text: str) -> list[dict]:
     텍스트에서 JSON 형식의 line_comments를 추출
     """
     try:
-        # JSON 블록 찾기
         json_match = re.search(r"```json\s*(\{.*?\})\s*```", text, re.DOTALL)
         if json_match:
             json_data = json.loads(json_match.group(1))
@@ -553,7 +531,6 @@ def review_pr(
         final_prompt = create_final_prompt(diff, all_context, language)
         messages.append({"role": "user", "content": final_prompt})
         final_review = call_openai(messages, model, openai_api_key, force_json=False)
-        # 최종 리뷰에서도 line_comments 추출 시도
         additional_comments = extract_line_comments_from_text(final_review)
         if additional_comments:
             final_line_comments.extend(additional_comments)
@@ -581,7 +558,6 @@ def review_pr(
             f"{total_patterns}개 패턴, {total_files}개 파일, {total_matches}개 매치"
         )
 
-        # 자세한 context 정보 생성
         context_details = "\n<details>\n<summary>🔍 Context 상세 정보</summary>\n\n"
         for pattern, files in all_context.items():
             context_details += f"**패턴: `{pattern}`**\n"
