@@ -46,11 +46,17 @@ Please respond in JSON format:
   "review": "if no additional context is needed, write the code review directly here with code examples",
   "line_comments": [
     {{
-      "file": "filename",
+      "file": "filename", 
       "line": line_number,
       "comment": "specific review comment for that line with code examples if applicable"
     }}
   ]
+
+IMPORTANT for line_comments:
+- Only provide line numbers for lines that are ADDED (marked with + in the diff)
+- Do NOT provide line numbers for unchanged lines or deleted lines
+- Use the exact line number as shown in the diff output
+- If you want to comment on unchanged code, include it in the general review instead
 }}
 
 ```diff
@@ -106,6 +112,12 @@ Please respond in JSON format:
       "comment": "specific review comment for that line with code examples if applicable"
     }}
   ]
+
+IMPORTANT for line_comments:
+- Only provide line numbers for lines that are ADDED (marked with + in the diff)
+- Do NOT provide line numbers for unchanged lines or deleted lines
+- Use the exact line number as shown in the diff output
+- If you want to comment on unchanged code, include it in the general review instead
 }}
 
 Original diff:
@@ -156,6 +168,12 @@ If you have detailed comments for specific lines, also provide the following JSO
   ]
 }}
 ```
+
+IMPORTANT for line_comments:
+- Only provide line numbers for lines that are ADDED (marked with + in the diff)
+- Do NOT provide line numbers for unchanged lines or deleted lines
+- Use the exact line number as shown in the diff output
+- If you want to comment on unchanged code, include it in the general review instead
 
 ```diff
 {diff}

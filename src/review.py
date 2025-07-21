@@ -326,8 +326,31 @@ def post_comment(github_token: str, body: str, pr_number: str):
         raise RuntimeError(f"Failed to post comment: {response.text}")
 
 
+def get_valid_diff_lines(diff: str) -> dict[str, set[int]]:
+    """
+    diff에서 실제로 변경된 줄 번호들을 추출
+    GitHub API는 주로 추가된 줄(+)에만 줄별 댓글을 허용
+    """
+    valid_lines = {}
+    file_changes = parse_diff_with_line_numbers(diff)
+
+    for file_path, hunks in file_changes.items():
+        valid_lines[file_path] = set()
+        for hunk in hunks:
+            for line in hunk["lines"]:
+                # 추가된 줄(+)에만 댓글 허용
+                if line["type"] == "+" and line["line_number"] is not None:
+                    valid_lines[file_path].add(line["line_number"])
+
+    return valid_lines
+
+
 def post_review_comments(
-    github_token: str, pr_number: str, head_sha: str, line_comments: list[dict]
+    github_token: str,
+    pr_number: str,
+    head_sha: str,
+    line_comments: list[dict],
+    diff: str = "",
 ):
     """
     특정 줄에 리뷰 댓글을 답니다
@@ -337,45 +360,74 @@ def post_review_comments(
 
     repo = os.environ["GITHUB_REPOSITORY"]
 
-    comments = []
+    # diff에서 유효한 줄 번호들 추출
+    valid_diff_lines = {}
+    if diff:
+        valid_diff_lines = get_valid_diff_lines(diff)
+
+    valid_comments = []
+    invalid_comments = []
+
     for comment in line_comments:
         if "file" in comment and "line" in comment and "comment" in comment:
-            comments.append(
-                {
-                    "path": comment["file"],
-                    "line": comment["line"],
-                    "body": comment["comment"],
-                }
+            file_path = comment["file"]
+            line_number = comment["line"]
+
+            # diff에 포함된 유효한 줄인지 확인
+            if (
+                file_path in valid_diff_lines
+                and line_number in valid_diff_lines[file_path]
+            ):
+                valid_comments.append(
+                    {
+                        "path": file_path,
+                        "line": line_number,
+                        "body": comment["comment"],
+                        "side": "RIGHT",  # 새로 추가된 줄에 대한 댓글
+                    }
+                )
+            else:
+                invalid_comments.append(comment)
+
+    # 유효한 줄별 댓글이 있으면 GitHub API로 전송
+    if valid_comments:
+        review_data = {
+            "commit_id": head_sha,
+            "body": "🤖 AI 코드 리뷰",
+            "event": "COMMENT",
+            "comments": valid_comments,
+        }
+
+        url = f"https://api.github.com/repos/{repo}/pulls/{pr_number}/reviews"
+        headers = {
+            "Authorization": f"token {github_token}",
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+        }
+
+        response = requests.post(url, json=review_data, headers=headers)
+        if response.status_code >= 300:
+            print(f"⚠️ Failed to post line comments: {response.text}")
+            # 실패 시 모든 댓글을 invalid_comments에 추가
+            invalid_comments.extend(
+                [
+                    {"file": c["path"], "line": c["line"], "comment": c["body"]}
+                    for c in valid_comments
+                ]
             )
+        else:
+            print(f"✅ {len(valid_comments)} line comments posted successfully.")
 
-    if not comments:
-        return
-
-    review_data = {
-        "commit_id": head_sha,
-        "body": "🤖 AI 코드 리뷰",
-        "event": "COMMENT",
-        "comments": comments,
-    }
-
-    url = f"https://api.github.com/repos/{repo}/pulls/{pr_number}/reviews"
-    headers = {
-        "Authorization": f"token {github_token}",
-        "Accept": "application/vnd.github+json",
-        "X-GitHub-Api-Version": "2022-11-28",
-    }
-
-    response = requests.post(url, json=review_data, headers=headers)
-    if response.status_code >= 300:
-        print(f"⚠️ Failed to post line comments: {response.text}")
-        # 줄별 댓글 실패 시 일반 댓글로 폴백
-        fallback_body = "🤖 AI 코드 리뷰 (줄별 댓글)\n\n"
-        for comment in line_comments:
+    # 유효하지 않은 줄의 댓글들은 일반 댓글로 처리
+    if invalid_comments:
+        print(
+            f"📝 {len(invalid_comments)} comments posted as general comment (not on specific lines)"
+        )
+        fallback_body = "🤖 AI 코드 리뷰 (일반 댓글)\n\n"
+        for comment in invalid_comments:
             fallback_body += f"**{comment.get('file', 'Unknown file')}:{comment.get('line', 'Unknown line')}**\n"
             fallback_body += f"{comment.get('comment', '')}\n\n"
         post_comment(github_token, fallback_body, pr_number)
-    else:
-        print(f"✅ {len(comments)} line comments posted successfully.")
 
 
 def call_openai(
@@ -513,7 +565,9 @@ def review_pr(
 
     if final_line_comments:
         print(f"📌 Posting {len(final_line_comments)} line comments...")
-        post_review_comments(github_token, pr_number, head_sha, final_line_comments)
+        post_review_comments(
+            github_token, pr_number, head_sha, final_line_comments, diff
+        )
 
     context_summary = ""
     context_details = ""
