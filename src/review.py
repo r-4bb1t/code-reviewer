@@ -333,8 +333,9 @@ def post_comment(github_token: str, body: str, pr_number: str):
     repo = os.environ["GITHUB_REPOSITORY"]
     url = f"https://api.github.com/repos/{repo}/issues/{pr_number}/comments"
     headers = {
-        "Authorization": f"Bearer {github_token}",
+        "Authorization": f"token {github_token}",
         "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
     }
     response = requests.post(url, json={"body": body}, headers=headers)
     if response.status_code >= 300:
