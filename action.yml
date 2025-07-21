@@ -1,0 +1,42 @@
+name: "AI Code Review Action"
+description: "Perform code reviews using OpenAI API."
+inputs:
+  GITHUB_TOKEN:
+    description: "GitHub token to interact with the repository."
+    required: true
+  OPENAI_API_KEY:
+    description: "OpenAI API key for GPT."
+    required: true
+  OPENAI_API_MODEL:
+    description: "OpenAI API model."
+    required: false
+    default: "gpt-4o"
+  exclude:
+    description: "Glob patterns to exclude files from the diff analysis"
+    required: false
+    default: ""
+  MAX_RECURSION:
+    description: "Maximum number of context gathering iterations"
+    required: false
+    default: "3"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Setup Python 3.11
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+    - run: python -m pip install --upgrade pip && pip install -r requirements.txt
+      shell: bash
+    - run: python entrypoint.py
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.GITHUB_TOKEN }}
+        OPENAI_API_KEY: ${{ inputs.OPENAI_API_KEY }}
+        OPENAI_API_MODEL: ${{ inputs.OPENAI_API_MODEL }}
+        EXCLUDE: ${{ inputs.exclude }}
+        MAX_RECURSION: ${{ inputs.MAX_RECURSION }}
+branding:
+  icon: "zap"
+  color: "yellow"
