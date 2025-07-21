@@ -2,21 +2,36 @@ from typing import Any
 import json
 
 
-def create_initial_prompt(diff: str, language: str) -> str:
-    lang_instruction = f"Answer in {language}." if language.lower() != "english" else ""
+def _get_language_instruction(language: str) -> str:
+    return f"Answer in {language}." if language.lower() != "english" else ""
 
-    return f"""You are a code review AI. {lang_instruction}
 
-Analyze the following diff and request additional context if needed.
-
-When providing code review feedback, include specific code examples to illustrate your suggestions if necessary. 
+def _get_common_guidelines() -> str:
+    return """When providing code review feedback, include specific code examples to illustrate your suggestions if necessary. 
 For example, if suggesting an improvement, show both the problematic code and the improved version.
 Consider suggesting multiple improvements for the same code.
 
 Follow proper markdown syntax:
 - Use backticks (`) around keywords, function names, variable names, and inline code
 - Use triple backticks (```) for code blocks and always specify the language (e.g., ```python, ```javascript)
-- Use proper markdown formatting for emphasis and structure
+- Use proper markdown formatting for emphasis and structure"""
+
+
+def _get_markdown_guidelines() -> str:
+    return """Follow proper markdown syntax:
+- Use backticks (`) around keywords, function names, variable names, and inline code
+- Use triple backticks (```) for code blocks and always specify the language (e.g., ```python, ```javascript)
+- Use proper markdown formatting for emphasis and structure"""
+
+
+def create_initial_prompt(diff: str, language: str) -> str:
+    lang_instruction = _get_language_instruction(language)
+
+    return f"""You are a code review AI. {lang_instruction}
+
+Analyze the following diff and request additional context if needed.
+
+{_get_common_guidelines()}
 
 Please respond in JSON format:
 
@@ -46,7 +61,7 @@ Please respond in JSON format:
 def create_context_prompt(
     diff: str, context_data: dict[str, Any], iteration: int, language: str
 ) -> str:
-    lang_instruction = f"Answer in {language}." if language.lower() != "english" else ""
+    lang_instruction = _get_language_instruction(language)
 
     context_text = ""
     for pattern, data in context_data.items():
@@ -71,10 +86,7 @@ Based on this information, please request more context if needed, or provide the
 When providing code review feedback, always include specific code examples to illustrate your suggestions.
 For example, if suggesting an improvement, show both the problematic code and the improved version.
 
-Follow proper markdown syntax:
-- Use backticks (`) around keywords, function names, variable names, and inline code
-- Use triple backticks (```) for code blocks and always specify the language (e.g., ```python, ```javascript)
-- Use proper markdown formatting for emphasis and structure
+{_get_markdown_guidelines()}
 
 Please respond in JSON format:
 
@@ -103,7 +115,7 @@ Original diff:
 
 
 def create_final_prompt(diff: str, all_context: dict[str, Any], language: str) -> str:
-    lang_instruction = f"Answer in {language}." if language.lower() != "english" else ""
+    lang_instruction = _get_language_instruction(language)
 
     return f"""All context gathering is complete. Please write the final code review now. {lang_instruction}
 
@@ -118,10 +130,7 @@ IMPORTANT: For each suggestion or issue you identify, provide concrete code exam
 2. The improved version of the code
 3. Brief explanation of why the change is beneficial
 
-Follow proper markdown syntax:
-- Use backticks (`) around keywords, function names, variable names, and inline code
-- Use triple backticks (```) for code blocks and always specify the language (e.g., ```python, ```javascript)
-- Use proper markdown formatting for emphasis and structure
+{_get_markdown_guidelines()}
 
 Example format:
 ```python
