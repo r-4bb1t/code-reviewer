@@ -26,8 +26,25 @@ def get_pr_number() -> str:
     return str(event["pull_request"]["number"])
 
 
+def get_base_branch() -> str:
+    event_path = os.environ.get("GITHUB_EVENT_PATH")
+    if not event_path or not os.path.exists(event_path):
+        raise RuntimeError("GITHUB_EVENT_PATH not found")
+
+    with open(event_path) as f:
+        event = json.load(f)
+    return event["pull_request"]["base"]["ref"]
+
+
 def get_diff(exclude: str = "") -> str:
-    run("git fetch origin main")
+    base_branch = get_base_branch()
+    try:
+        run(
+            f"git fetch --unshallow origin {base_branch} 2>/dev/null || git fetch origin {base_branch}"
+        )
+    except Exception:
+        pass
+
     exclude_args = ""
     if exclude:
         exclude_patterns = [
@@ -37,14 +54,40 @@ def get_diff(exclude: str = "") -> str:
             [f'":(exclude){pattern}"' for pattern in exclude_patterns]
         )
 
-    cmd = 'git diff origin/main...HEAD -- . ":(exclude)dist/**"'
-    if exclude_args:
-        cmd += f" {exclude_args}"
-    return run(cmd)
+    try:
+        cmd = f'git diff origin/{base_branch}...HEAD -- . ":(exclude)dist/**"'
+        if exclude_args:
+            cmd += f" {exclude_args}"
+        return run(cmd)
+    except RuntimeError:
+        try:
+            cmd = f'git diff origin/{base_branch} HEAD -- . ":(exclude)dist/**"'
+            if exclude_args:
+                cmd += f" {exclude_args}"
+            return run(cmd)
+        except RuntimeError:
+            try:
+                merge_base = run(f"git merge-base origin/{base_branch} HEAD").strip()
+                cmd = f'git diff {merge_base}..HEAD -- . ":(exclude)dist/**"'
+                if exclude_args:
+                    cmd += f" {exclude_args}"
+                return run(cmd)
+            except RuntimeError:
+                cmd = 'git diff HEAD~1 HEAD -- . ":(exclude)dist/**"'
+                if exclude_args:
+                    cmd += f" {exclude_args}"
+                return run(cmd)
 
 
 def get_changed_files(exclude: str = "") -> list[str]:
-    run("git fetch origin main")
+    base_branch = get_base_branch()
+    try:
+        run(
+            f"git fetch --unshallow origin {base_branch} 2>/dev/null || git fetch origin {base_branch}"
+        )
+    except Exception:
+        pass
+
     exclude_args = ""
     if exclude:
         exclude_patterns = [
@@ -54,11 +97,37 @@ def get_changed_files(exclude: str = "") -> list[str]:
             [f'":(exclude){pattern}"' for pattern in exclude_patterns]
         )
 
-    cmd = 'git diff --name-only origin/main...HEAD -- . ":(exclude)dist/**"'
-    if exclude_args:
-        cmd += f" {exclude_args}"
-    files = run(cmd).strip().split("\n")
-    return [f for f in files if f.strip()]
+    try:
+        cmd = (
+            f'git diff --name-only origin/{base_branch}...HEAD -- . ":(exclude)dist/**"'
+        )
+        if exclude_args:
+            cmd += f" {exclude_args}"
+        files = run(cmd).strip().split("\n")
+        return [f for f in files if f.strip()]
+    except RuntimeError:
+        try:
+            cmd = f'git diff --name-only origin/{base_branch} HEAD -- . ":(exclude)dist/**"'
+            if exclude_args:
+                cmd += f" {exclude_args}"
+            files = run(cmd).strip().split("\n")
+            return [f for f in files if f.strip()]
+        except RuntimeError:
+            try:
+                merge_base = run(f"git merge-base origin/{base_branch} HEAD").strip()
+                cmd = (
+                    f'git diff --name-only {merge_base}..HEAD -- . ":(exclude)dist/**"'
+                )
+                if exclude_args:
+                    cmd += f" {exclude_args}"
+                files = run(cmd).strip().split("\n")
+                return [f for f in files if f.strip()]
+            except RuntimeError:
+                cmd = 'git diff --name-only HEAD~1 HEAD -- . ":(exclude)dist/**"'
+                if exclude_args:
+                    cmd += f" {exclude_args}"
+                files = run(cmd).strip().split("\n")
+                return [f for f in files if f.strip()]
 
 
 def search_code_in_repo(
